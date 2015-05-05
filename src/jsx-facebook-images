@@ -1,0 +1,386 @@
+/*
+ * Copyright 2015 Kai Feldmaier (kai.feldmaier@gmail.com)
+ */
+if (BridgeTalk.appName == "photoshop") 
+{
+	var __t = {
+		abborted: "Execution stopped",
+		noImageDir: "No files found in given directory!",
+		selResFolder: "Select the directory of images you want to process",
+		selWatermark: "Choose an image for the watermark",
+		author: null // Enter Author name here or leave blank
+	}
+	var maxWidth  = 1200;
+	var maxHeight = 900;
+	var borderSize = 20;
+	var startRulerUnits = app.preferences.rulerUnits;
+		
+	// Open directory dialog
+	var inputFolder = Folder.selectDialog(__t.selResFolder);
+	if (inputFolder)
+	{
+		var fileList = inputFolder.getFiles("*.JPG");
+		if (fileList && fileList.length)
+		{
+			// Open file dialog
+			var wmFile = File.openDialog(__t.selWatermark);
+			if(wmFile != null) 
+			{
+				app.preferences.rulerUnits = Units.PIXELS;
+				for(var i=0; i<fileList.length; i++) 
+				{
+					if (!handleImage(
+							fileList[i], 
+							wmFile, 
+							maxWidth, 
+							maxHeight, 
+							borderSize, 
+							20,
+							__t.author
+							)
+						)
+						break;
+				}
+				app.preferences.rulerUnits = startRulerUnits;
+			} else {
+				alert(__t.abborted);
+			}
+		} else {
+			alert(__t.noImageDir);
+		}
+	} else {
+		alert(__t.abborted);
+	}
+
+	function handleImage (file, watermarkFile, maxWidth, maxHeight, borderSize, watermarkSizePercent, copyrightText)
+	{
+		if (file instanceof File && file.hidden == false) 
+		{
+
+			/*
+			 * C O M P O S I T I O N
+			 */
+
+			var comp = { // Resulting image
+				document: null,
+				group: null
+			}
+
+			/*
+			 * B O R D E R
+			 */
+
+			var border = { // Border
+				layer: null,
+				color: null,
+				size: borderSize
+			}
+
+			border.color = new SolidColor();
+			border.color.rgb.red = 255;
+			border.color.rgb.green = 255;
+			border.color.rgb.blue = 255;
+
+			/*
+			 * I M A G E
+			 */
+
+			var img = { // Image
+				document: null,
+				layer: null,
+				width: 0,
+				height: 0,
+				name: '',
+				path: ''
+			};
+
+			img.document = open(file);
+			img.document.flatten();
+			img.name = img.document.name;
+			img.path = img.document.path;
+			img.width = img.document.width.as('px');
+			img.height = img.document.height.as('px');
+
+
+			if (img.height > img.width)
+			{
+				var s = img.height;
+				img.width = img.width/s *maxHeight;
+				img.height = maxHeight;
+			} else {
+				var s = img.width;
+				img.width = maxWidth;
+				img.height = img.height/s *maxWidth;
+			}
+
+			// image to clipboard
+			img.document.selection.selectAll();
+			img.document.selection.copy();
+			img.document.selection.deselect();
+			img.document.close();
+
+			comp.document = app.documents.add(
+				UnitValue(img.width, 'px'),
+				UnitValue(img.height, 'px'),
+				72,
+				img.name, 
+				NewDocumentMode.RGB,
+				DocumentFill.WHITE
+			);
+			comp.group = comp.document.layerSets.add();
+
+			/*
+			 * B A C K G R O U N D
+			 */
+
+			var bg = { // Background
+				layer: null
+			};
+
+			// create the background layer
+			bg.layer = comp.document.artLayers.add();
+			bg.layer.name = "Background";
+			bg.layer.blendMode = BlendMode.NORMAL;
+
+			comp.document.selection.select([
+					[0,0],
+					[UnitValue(img.width, 'px'),0],
+					[UnitValue(img.width, 'px'),UnitValue(img.height, 'px')],
+					[0,UnitValue(img.height, 'px')]
+				]);
+			comp.document.selection.fill(border.color);
+			comp.document.selection.deselect();
+
+			bg.layer.move(comp.group, ElementPlacement.PLACEATBEGINNING);
+
+			//----
+			img.layer = comp.document.paste();
+			img.layer.name = 'Image ' +img.name;
+			img.layer.move(comp.group, ElementPlacement.INSIDE); 
+
+			resizeLayer(img.layer, UnitValue(img.width, 'px')-(border.size*2), UnitValue(img.height, 'px')-(border.size*2));
+			moveLayerTo(img.layer, border.size, border.size);
+			img.layer.applySharpen();
+
+			/*
+			 * W A T E R M A R K
+			 */
+
+			var wm = { // Background
+				document: null,
+				layer: null,
+				width: 0,
+				height: 0,
+				x: 0,
+				y: 0,
+				name: '',
+				padding: 0
+			};
+
+			wm.document = open(watermarkFile);
+			wm.document.flatten();
+			// image to clipboard
+			wm.document.selection.selectAll();
+			wm.document.selection.copy();
+			wm.document.selection.deselect();
+			wm.name = wm.document.name;
+			wm.width = wm.document.width.as('px');
+			wm.height = wm.document.height.as('px');
+			wm.document.close();
+
+			wm.layer = comp.document.paste();
+			wm.layer.name = 'Watermark '+wm.name;
+			
+			if (wm.height > wm.width)
+			{
+				var s = wm.height;
+				wm.height = img.height/100 *watermarkSizePercent;
+				wm.width = wm.width/s *wm.height;
+			} else {
+				var s = wm.width;
+				wm.width = img.width/100 *watermarkSizePercent;
+				wm.height = wm.height/s *wm.width;
+			}
+
+			wm.padding = wm.width *0.05;
+
+			// alert('width: '+wm.width +'\nheight: ' +wm.height +'\nPercent: ' +watermarkSizePercent);
+			resizeLayer(
+				wm.layer, 
+				wm.width -(2*wm.padding), 
+				wm.height -(2*wm.padding)
+			);
+
+			wm.x = img.width -(2*border.size) -wm.width;
+			wm.y = border.size;
+			moveLayerTo(
+				wm.layer, 
+				wm.x +wm.padding, 
+				wm.y +wm.padding
+			);
+
+			wm.layer.applySharpen();
+
+			// ----
+			border.layer = comp.document.artLayers.add();
+			border.layer.name = "Border";
+			border.layer.blendMode = BlendMode.NORMAL;
+
+			comp.document.selection.select([
+					[0,0],
+					[UnitValue(img.width, 'px'),0],
+					[UnitValue(img.width, 'px'),UnitValue(img.height, 'px')],
+					[0,UnitValue(img.height, 'px')]
+				]);
+			comp.document.selection.fill(border.color);
+			comp.document.selection.deselect();
+			comp.document.selection.select([
+					[border.size, border.size],
+					[UnitValue(img.width, 'px') -border.size, border.size],
+					[UnitValue(img.width, 'px') -border.size, UnitValue(img.height, 'px') -border.size],
+					[border.size, UnitValue(img.height, 'px') -border.size]
+				]);
+			comp.document.selection.clear();
+			comp.document.selection.deselect();
+			comp.document.selection.select([
+					[wm.x, wm.y],
+					[wm.x +wm.width, wm.y],
+					[wm.x +wm.width, wm.y +wm.height],
+					[wm.x, wm.y +wm.height]
+				]);
+			comp.document.selection.fill(border.color);
+			comp.document.selection.deselect();
+
+			border.layer.move(comp.group, ElementPlacement.INSIDE);
+
+			wm.layer.move(comp.group, ElementPlacement.INSIDE); 
+
+			if (copyrightText)
+			{
+				/*
+				 * C O P Y R I G H T
+				 */
+
+				var copyright = { // Copyright
+					layer: null,
+					shadowLayer: null,
+					textItem: null,
+					x: 0,
+					y: 0,
+					text: '©',
+					size: 10
+				};
+
+				var white = new SolidColor();
+					white.rgb.red = 255;
+					white.rgb.green = 255;
+					white.rgb.blue = 255;
+
+				var black = new SolidColor();
+					black.rgb.red = 0;
+					black.rgb.green = 0;
+					black.rgb.blue = 0;
+
+				var year = new Date().getFullYear();
+				copyright.text = '© '+year+' '+copyrightText;
+
+				// create the Copyright layer
+				copyright.shadowLayer = comp.document.artLayers.add();
+				copyright.shadowLayer.name = "Copyright Shadow";
+				copyright.shadowLayer.kind = LayerKind.TEXT;
+				copyright.shadowLayer.blendMode = BlendMode.NORMAL;
+				copyright.shadowLayer.move(comp.group, ElementPlacement.INSIDE);
+
+				copyright.textItem = copyright.shadowLayer.textItem;
+				copyright.textItem.kind = TextType.POINTTEXT;
+				
+				copyright.textItem.antiAliasMethod = AntiAlias.SMOOTH;
+				copyright.textItem.justification = Justification.LEFT;
+		
+				copyright.textItem.contents = copyright.text;
+				copyright.textItem.color = black;
+				copyright.textItem.size = copyright.size;
+				copyright.textItem.font = "Arial";
+
+				copyright.x = border.size *2;
+				copyright.y = img.height -(border.size *1.5);
+
+				copyright.textItem.position = [copyright.x, copyright.y];
+
+				copyright.layer = copyright.shadowLayer.duplicate(comp.document, ElementPlacement.INSIDE);
+				copyright.layer.name = "Copyright";
+				copyright.layer.blendMode = BlendMode.NORMAL;
+				copyright.layer.move(comp.group, ElementPlacement.INSIDE);
+
+				var textItem = copyright.layer.textItem;	
+				textItem.color = white;
+
+				copyright.shadowLayer.rasterize(RasterizeType.TEXTCONTENTS);
+				copyright.shadowLayer.applyGaussianBlur(1);
+				copyright.shadowLayer.opacity = 75;
+			}
+
+			var newName = 'facebook-'+comp.document.name;
+				newName = uniqueFileName(img.path, newName, 'jpg');
+			var options = new ExportOptionsSaveForWeb();
+				options.quality = 75;
+				options.format = SaveDocumentType.JPEG;
+				options.optimized = true;
+
+			comp.document.exportDocument(File(img.path+'/'+newName), ExportType.SAVEFORWEB, options);
+
+			comp.document.close(SaveOptions.DONOTSAVECHANGES);
+			return true;
+	    }
+	    return false;
+	}
+
+	function uniqueFileName(path, name, extension)
+	{
+		if (name.indexOf('.') > -1)
+			name = name.substr(0, name.indexOf('.'));
+
+		var n = name+'.'+extension;
+		var f = File(path+'/'+n);
+		var cnt = 1;
+		while(f.exists)
+		{
+			n = name+cnt+'.'+extension;
+			f = File(path+'/'+n);
+		}
+		return n;
+	}
+
+	function resizeLayer(layer, width, height)
+	{
+		if(layer.isBackgroundLayer) 
+			return;
+
+		var startRulerUnits = preferences.rulerUnits;
+		preferences.rulerUnits = Units.PIXELS;
+		var LB = activeDocument.activeLayer.bounds;
+		var lWidth = 100/(LB[2].value - LB[0].value);
+		var lHeight =100/(LB[3].value - LB[1].value);
+		var NewWidth = lWidth * width;
+		var NewHeight = lHeight * height;
+		layer.resize(Number(NewWidth),Number(NewHeight),AnchorPosition.MIDDLECENTER); 
+		app.preferences.rulerUnits = startRulerUnits;
+	}
+
+	function moveLayerTo(layer, x, y) 
+	{
+		if(layer.isBackgroundLayer) 
+			return;
+
+		var startRulerUnits = preferences.rulerUnits;
+		preferences.rulerUnits = Units.PIXELS;
+
+	  	var position = layer.bounds;
+	  	position[0] = x - position[0];
+	  	position[1] = y - position[1];
+
+	  	layer.translate(-position[0],-position[1]);
+
+		app.preferences.rulerUnits = startRulerUnits;
+	}
+}
