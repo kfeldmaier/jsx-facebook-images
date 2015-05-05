@@ -16,3 +16,6 @@ The script performs a bunch of actions in the given order:
 - Sharpens both image and watermark
 - Adds a copyright notice to the lower left corner of the image
 - Saves the image using a "facebook-" prefix for the filename (Automatically creates a unique filename, so no file is overwritten)
+
+## Tested in
+- Adobe Photoshop CS6
